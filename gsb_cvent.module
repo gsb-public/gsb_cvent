@@ -1,0 +1,151 @@
+<?php
+
+/**
+ * @file
+ * Contains hook implementations and helper functions for GSB Cvent
+ */
+
+/**
+ * Implementation of hook_menu().
+ */
+function gsb_cvent_menu() {
+  $items = array();
+
+  $items['admin/config/gsb/cvent/import'] = array(
+    'title' => 'GSB Cvent Import',
+    'description' => 'GSB Cvent Import.',
+    'page callback' => 'gsb_cvent_all_events_import',
+    'access arguments' => array('administer cvent'),
+  );
+
+  return $items;
+}
+
+
+/**
+ * Login to Cvent API.
+ */
+function gsb_cvent_login() {
+  // Get the library info.
+  $library_path = libraries_get_path('php-cvent') . '/CventClient.class.php';
+  if (!file_exists($library_path)) {
+    drupal_set_message('php-cvent: The CventClient library was not found.', 'error');
+    return;
+  }
+  include_once($library_path);
+  $accountnumber =  'SUBSCA001'; //variable_get('gsb_cvent_account_number', $default = NULL);
+  $username = 'SUBSCA001Api'; //variable_get('gsb_cvent_user_name', $default = NULL);
+  $password = 'UyK961vjlr2'; //variable_get('gsb_cvent_password', $default = NULL);
+ 
+  $client = new CventClient();
+  $client->Login($accountnumber, $username, $password);
+  if ($client->CventSessionHeader) {
+    echo 'client login ok';
+  } else { echo 'Login unsuccessful!';}
+  return $client;
+}
+
+/* 
+ * Searchs all events based on condition
+ */
+function  gsb_cvent_Searchallevent() {
+  $client = gsb_cvent_login();
+  $response = $client->SearchByFilter('Event', 'AndSearch', array(
+            (object) array('Field' => 'EventStatus', 'Operator' => 'Equals', 'Value' => 'Active'),
+            (object) array('Field' => 'ProductName', 'Operator' => 'Equals', 'Value' => 'MBA Class Visit')));
+  dpm($response);
+  if(isset($response->SearchResult->Id)) return $response->SearchResult->Id;
+  return false;
+}
+
+/* 
+ * Gets upcoming events
+ */
+function gsb_cvent_all_events_import() {
+  $client = gsb_cvent_login();
+
+  $event_ids = $client->GetUpcomingEvents();
+  $i = 0;
+  foreach ($event_ids as $event_id)
+  {
+    $event = $client->GetEventById($event_id);
+    if ($i > 9){
+      break;
+    }
+    $i++;
+  }
+   return 'gsb_cvent_all_events_import completed';
+}
+
+/**
+ * Imports an Event
+ */
+function gsb_cvent_event_import($event) {
+
+  // Check if the event already exists
+  $query = new EntityFieldQuery();
+
+  $query->entityCondition('entity_type', 'node')
+    ->entityCondition('bundle', 'admission_event')
+    ->propertyCondition('title', "%".$event->EventTitle."%", "LIKE");
+
+  $entities = $query->execute();
+
+  if (!empty($entities['node'])) {
+    $nid = array_keys($entities['node']);
+    $node = node_load(array_shift($nid));
+  }
+  else {
+    $field_values = array(
+      'type' => 'admission_event',
+      'uid' => 1,
+      'status' => 1,
+      'promote' => 0,
+    );
+    // Create the admission event
+    $node = entity_create('node', $field_values);
+  }
+  // update the admission event node information
+  $wrapper = entity_metadata_wrapper('node', $node);
+
+  $wrapper->title->set((string)$event->EventTitle);
+  $wrapper->field_event_detail->set(1);
+
+  $wrapper->field_editorial_summary->set((string)$event->EventDescription);
+  $wrapper->field_link_single->url->set((string)$event->WeblinkDetail[104]->URL);
+
+  // Set the event start and end date
+  $wrapper->field_event_date[0]->set(array(
+    'value' => $event->EventStartDate,
+    'value2' => $event->EventEndDate,
+  ));
+  $wrapper->field_time_zone->set('America/Los_Angeles');//(string)$event->Timezone);
+
+  // Set different event location fields
+  $field_collection = $wrapper->field_event_location->value();
+  $field_collection_wrapper = entity_metadata_wrapper('field_collection_item', $field_collection);
+  if(empty($field_collection_wrapper->field_event_location_type)) {
+    $field_collection_wrapper = _gsb_cvent_create_fc_wrapper('node', $node, 'field_event_location');
+  }
+  $field_collection_wrapper->field_event_location_type->set((string)$event->CustomFieldDetail[0]->FieldValue);
+  $field_collection_wrapper->field_address->locality->set((string)$event->City);
+  $field_collection_wrapper->field_address->administrative_area->set((string)$event->State);
+ // $field_collection_wrapper->field_address->country->set((string)$event->Country);
+  $field_collection_wrapper->save();
+
+  // Finally save the entity
+  $wrapper->save();
+}
+
+/**
+ * Create the field collection wrapper
+ */
+function _gsb_cvent_create_fc_wrapper($entity_type, $node, $field_collection_name) {
+  // Create a field_collection_item entity
+  $field_collection_item = entity_create('field_collection_item', array('field_name' => $field_collection_name));
+
+  // Attach it to the node and Wrap it with Entity API
+  $field_collection_item->setHostEntity($entity_type, $node);
+  $field_collection_wrapper = entity_metadata_wrapper('field_collection_item', $field_collection_item);
+  return $field_collection_wrapper;
+}
