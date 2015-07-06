@@ -10,6 +10,13 @@
  */
 function gsb_cvent_menu() {
   $items = array();
+  $items['admin/config/gsb/cvent'] = array(
+    'title' => 'GSB Cvent',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('gsb_cvent_settings_form'),
+    'access arguments' => array('administer cvent'),
+    'file' => 'gsb_cvent.admin.inc',
+  );
 
   $items['admin/config/gsb/cvent/import'] = array(
     'title' => 'GSB Cvent Import',
@@ -21,6 +28,16 @@ function gsb_cvent_menu() {
   return $items;
 }
 
+/**
+ * Implements hook_permission().
+ */
+function gsb_cvent_permission() {
+  return array(
+    'administer cvent' => array(
+      'title' => t('Administer cvent'),
+    ),
+  );
+}
 
 /**
  * Login to Cvent API.
@@ -33,27 +50,28 @@ function gsb_cvent_login() {
     return;
   }
   include_once($library_path);
-  $accountnumber =  'SUBSCA001'; //variable_get('gsb_cvent_account_number', $default = NULL);
-  $username = 'SUBSCA001Api'; //variable_get('gsb_cvent_user_name', $default = NULL);
-  $password = 'UyK961vjlr2'; //variable_get('gsb_cvent_password', $default = NULL);
+  $accountnumber = variable_get('gsb_cvent_account_number', $default = NULL);
+  $username = variable_get('gsb_cvent_user_name', $default = NULL);
+  $password = variable_get('gsb_cvent_password', $default = NULL);
  
   $client = new CventClient();
   $client->Login($accountnumber, $username, $password);
-  if ($client->CventSessionHeader) {
-    echo 'client login ok';
-  } else { echo 'Login unsuccessful!';}
+  if (!$client->CventSessionHeader) {
+    watchdog('gsb_cvent', 'Login failed!');
+  }
   return $client;
 }
 
 /* 
- * Searchs all events based on condition
+ * Search all events based on condition
  */
-function  gsb_cvent_Searchallevent() {
-  $client = gsb_cvent_login();
+function  gsb_cvent_search_events_bycondition($client) {
   $response = $client->SearchByFilter('Event', 'AndSearch', array(
             (object) array('Field' => 'EventStatus', 'Operator' => 'Equals', 'Value' => 'Active'),
-            (object) array('Field' => 'ProductName', 'Operator' => 'Equals', 'Value' => 'MBA Class Visit')));
-  dpm($response);
+           // (object) array('Field' => 'EventTitle', 'Operator' => 'Equals', 'Value' => 'MBA Program Information Session On Campus'),
+           //(object) array('Field' => 'ProductDetail', 'Operator' => 'Equals',
+           //   'ValueArray' => (object) array('Field' => '0', 'Operator' => 'Equals', 'Value' => 'ProductName')),
+            ));
   if(isset($response->SearchResult->Id)) return $response->SearchResult->Id;
   return false;
 }
@@ -64,17 +82,15 @@ function  gsb_cvent_Searchallevent() {
 function gsb_cvent_all_events_import() {
   $client = gsb_cvent_login();
 
-  $event_ids = $client->GetUpcomingEvents();
+  $event_ids = gsb_cvent_search_events_bycondition($client);
+  //$event_ids = $client->GetUpcomingEvents();
   $i = 0;
   foreach ($event_ids as $event_id)
   {
     $event = $client->GetEventById($event_id);
-    if ($i > 9){
-      break;
-    }
-    $i++;
+    gsb_cvent_event_import($event);
   }
-   return 'gsb_cvent_all_events_import completed';
+  return 'gsb_cvent_all_events_import completed';
 }
 
 /**
@@ -87,7 +103,7 @@ function gsb_cvent_event_import($event) {
 
   $query->entityCondition('entity_type', 'node')
     ->entityCondition('bundle', 'admission_event')
-    ->propertyCondition('title', "%".$event->EventTitle."%", "LIKE");
+    ->fieldCondition('field_item_id', 'value', (string)$event->Id);
 
   $entities = $query->execute();
 
@@ -111,6 +127,7 @@ function gsb_cvent_event_import($event) {
   $wrapper->title->set((string)$event->EventTitle);
   $wrapper->field_event_detail->set(1);
 
+  $wrapper->field_item_id->set((string)$event->Id);
   $wrapper->field_editorial_summary->set((string)$event->EventDescription);
   $wrapper->field_link_single->url->set((string)$event->WeblinkDetail[104]->URL);
 
@@ -122,7 +139,7 @@ function gsb_cvent_event_import($event) {
   $wrapper->field_time_zone->set('America/Los_Angeles');//(string)$event->Timezone);
 
   // Set different event location fields
-  $field_collection = $wrapper->field_event_location->value();
+/*   $field_collection = $wrapper->field_event_location->value();
   $field_collection_wrapper = entity_metadata_wrapper('field_collection_item', $field_collection);
   if(empty($field_collection_wrapper->field_event_location_type)) {
     $field_collection_wrapper = _gsb_cvent_create_fc_wrapper('node', $node, 'field_event_location');
@@ -131,7 +148,7 @@ function gsb_cvent_event_import($event) {
   $field_collection_wrapper->field_address->locality->set((string)$event->City);
   $field_collection_wrapper->field_address->administrative_area->set((string)$event->State);
  // $field_collection_wrapper->field_address->country->set((string)$event->Country);
-  $field_collection_wrapper->save();
+  $field_collection_wrapper->save(); */
 
   // Finally save the entity
   $wrapper->save();
