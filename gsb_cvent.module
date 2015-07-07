@@ -67,10 +67,7 @@ function gsb_cvent_login() {
  */
 function  gsb_cvent_search_events_bycondition($client) {
   $response = $client->SearchByFilter('Event', 'AndSearch', array(
-            (object) array('Field' => 'EventStatus', 'Operator' => 'Equals', 'Value' => 'Active'),
-           // (object) array('Field' => 'EventTitle', 'Operator' => 'Equals', 'Value' => 'MBA Program Information Session On Campus'),
-           //(object) array('Field' => 'ProductDetail', 'Operator' => 'Equals',
-           //   'ValueArray' => (object) array('Field' => '0', 'Operator' => 'Equals', 'Value' => 'ProductName')),
+                (object) array('Field' => 'EventStatus', 'Operator' => 'Equals', 'Value' => 'Active'),
             ));
   if(isset($response->SearchResult->Id)) return $response->SearchResult->Id;
   return false;
@@ -84,11 +81,26 @@ function gsb_cvent_all_events_import() {
 
   $event_ids = gsb_cvent_search_events_bycondition($client);
   //$event_ids = $client->GetUpcomingEvents();
-  $i = 0;
+  $event_type = array(
+    'Alumni Briefing',
+    'Class Visit',
+    'Diversity Event',
+    'Fair',
+    'Information Session'
+  );
+
   foreach ($event_ids as $event_id)
   {
     $event = $client->GetEventById($event_id);
-    gsb_cvent_event_import($event);
+
+    // check the event type matches
+    $cvent_event_types = explode(', ', $event->CustomFieldDetail[11]->FieldValue);
+    foreach ($cvent_event_types as $cvent_event_type) {
+      if (in_array($cvent_event_type, $event_type)){
+        gsb_cvent_event_import($event);
+        break;
+      }
+    }
   }
   return 'gsb_cvent_all_events_import completed';
 }
@@ -137,18 +149,24 @@ function gsb_cvent_event_import($event) {
     'value2' => $event->EventEndDate,
   ));
   $wrapper->field_time_zone->set('America/Los_Angeles');//(string)$event->Timezone);
+  //$wrapper->field_event_category->set((string)$event->CustomFieldDetail[11]->FieldValue);
+  //$wrapper->field_region->set((string)$event->CustomFieldDetail[3]->FieldValue);
 
   // Set different event location fields
-/*   $field_collection = $wrapper->field_event_location->value();
-  $field_collection_wrapper = entity_metadata_wrapper('field_collection_item', $field_collection);
-  if(empty($field_collection_wrapper->field_event_location_type)) {
+  $field_collection = $wrapper->field_event_location->raw();
+
+  if(empty($field_collection)) {
     $field_collection_wrapper = _gsb_cvent_create_fc_wrapper('node', $node, 'field_event_location');
   }
+  else{
+    $field_collection_wrapper = entity_metadata_wrapper('field_collection_item', $wrapper->field_event_location[0]->value());
+  }
   $field_collection_wrapper->field_event_location_type->set((string)$event->CustomFieldDetail[0]->FieldValue);
+
   $field_collection_wrapper->field_address->locality->set((string)$event->City);
   $field_collection_wrapper->field_address->administrative_area->set((string)$event->State);
  // $field_collection_wrapper->field_address->country->set((string)$event->Country);
-  $field_collection_wrapper->save(); */
+  $field_collection_wrapper->save();
 
   // Finally save the entity
   $wrapper->save();
