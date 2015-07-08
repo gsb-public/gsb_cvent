@@ -57,7 +57,7 @@ function gsb_cvent_login() {
   $client = new CventClient();
   $client->Login($accountnumber, $username, $password);
   if (!$client->CventSessionHeader) {
-    watchdog('gsb_cvent', 'Login failed!');
+    watchdog('gsb_cvent', 'Cvent API Login failed!');
   }
   return $client;
 }
@@ -92,7 +92,6 @@ function gsb_cvent_all_events_import() {
   foreach ($event_ids as $event_id)
   {
     $event = $client->GetEventById($event_id);
-
     // check the event type matches
     $cvent_event_types = explode(', ', $event->CustomFieldDetail[11]->FieldValue);
     foreach ($cvent_event_types as $cvent_event_type) {
@@ -149,8 +148,16 @@ function gsb_cvent_event_import($event) {
     'value2' => $event->EventEndDate,
   ));
   $wrapper->field_time_zone->set('America/Los_Angeles');//(string)$event->Timezone);
-  //$wrapper->field_event_category->set((string)$event->CustomFieldDetail[11]->FieldValue);
-  //$wrapper->field_region->set((string)$event->CustomFieldDetail[3]->FieldValue);
+
+  // Set the event category
+  //$term = taxonomy_get_term_by_name((string)$event->CustomFieldDetail[11]->FieldValue, 'event_category');
+  //$term = array_values($term);
+  //$wrapper->field_event_category->set($term);
+
+  // Set the region taxonomy
+  $term = taxonomy_get_term_by_name((string)$event->CustomFieldDetail[3]->FieldValue, 'region');
+  $term = array_values($term);
+  $wrapper->field_region->set($term);
 
   // Set different event location fields
   $field_collection = $wrapper->field_event_location->raw();
