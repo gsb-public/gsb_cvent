@@ -92,7 +92,6 @@ function gsb_cvent_all_events_import() {
   foreach ($event_ids as $event_id)
   {
     $event = $client->GetEventById($event_id);
-    //dpm($event);
     // check the event type matches
     $cvent_event_types = explode(', ', $event->CustomFieldDetail[11]->FieldValue);
     foreach ($cvent_event_types as $cvent_event_type) {
@@ -101,7 +100,6 @@ function gsb_cvent_all_events_import() {
         break;
       }
     }
-    //break;
   }
   return 'gsb_cvent_all_events_import completed';
 }
@@ -134,6 +132,11 @@ function gsb_cvent_event_import($event) {
     // Create the admission event
     $node = entity_create('node', $field_values);
   }
+  // Set the workbench access
+  $node->workbench_access['access_scheme'] = 'taxonomy'; // or 'menu'
+  $node->workbench_access = array(12401);
+  workbench_access_node_insert($node);
+
   // update the admission event node information
   $wrapper = entity_metadata_wrapper('node', $node);
 
@@ -173,6 +176,8 @@ function gsb_cvent_event_import($event) {
   }
   $field_collection_wrapper->field_event_location_type->set((string)$event->CustomFieldDetail[0]->FieldValue);
 
+  $field_collection_wrapper->field_address->postal_code->set(0);
+  $field_collection_wrapper->field_address->thoroughfare->set('Unknown');
   $field_collection_wrapper->field_address->country->set((string)$event->CountryCode);
   $field_collection_wrapper->field_address->locality->set((string)$event->City);
   if ($event->CountryCode == 'US') {
