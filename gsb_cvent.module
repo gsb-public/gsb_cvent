@@ -92,6 +92,7 @@ function gsb_cvent_all_events_import() {
   foreach ($event_ids as $event_id)
   {
     $event = $client->GetEventById($event_id);
+    //dpm($event);
     // check the event type matches
     $cvent_event_types = explode(', ', $event->CustomFieldDetail[11]->FieldValue);
     foreach ($cvent_event_types as $cvent_event_type) {
@@ -100,6 +101,7 @@ function gsb_cvent_all_events_import() {
         break;
       }
     }
+    //break;
   }
   return 'gsb_cvent_all_events_import completed';
 }
@@ -148,11 +150,12 @@ function gsb_cvent_event_import($event) {
     'value2' => $event->EventEndDate,
   ));
   $wrapper->field_time_zone->set('America/Los_Angeles');//(string)$event->Timezone);
+  $wrapper->field_program_single->set(10881); // Set it to MBA
 
   // Set the event category
-  //$term = taxonomy_get_term_by_name((string)$event->CustomFieldDetail[11]->FieldValue, 'event_category');
-  //$term = array_values($term);
-  //$wrapper->field_event_category->set($term);
+/*   $term = taxonomy_get_term_by_name((string)$event->CustomFieldDetail[11]->FieldValue, 'event_category');
+  $term = array_values($term);
+  $wrapper->field_event_category->set($term); */
 
   // Set the region taxonomy
   $term = taxonomy_get_term_by_name((string)$event->CustomFieldDetail[3]->FieldValue, 'region');
@@ -170,9 +173,14 @@ function gsb_cvent_event_import($event) {
   }
   $field_collection_wrapper->field_event_location_type->set((string)$event->CustomFieldDetail[0]->FieldValue);
 
+  $field_collection_wrapper->field_address->country->set((string)$event->CountryCode);
   $field_collection_wrapper->field_address->locality->set((string)$event->City);
-  $field_collection_wrapper->field_address->administrative_area->set((string)$event->State);
- // $field_collection_wrapper->field_address->country->set((string)$event->Country);
+  if ($event->CountryCode == 'US') {
+    $field_collection_wrapper->field_address->administrative_area->set((string)$event->StateCode);
+  }
+  else {
+    $field_collection_wrapper->field_address->administrative_area->set((string)$event->State);
+  }
   $field_collection_wrapper->save();
 
   // Finally save the entity
