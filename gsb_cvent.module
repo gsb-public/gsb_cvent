@@ -89,13 +89,12 @@ function gsb_cvent_all_events_import() {
     'Information Session'
   );
 
-  foreach ($event_ids as $event_id)
-  {
+  foreach ($event_ids as $event_id) {
     $event = $client->GetEventById($event_id);
     // check the event type matches
     $cvent_event_types = explode(', ', $event->CustomFieldDetail[11]->FieldValue);
     foreach ($cvent_event_types as $cvent_event_type) {
-      if (in_array($cvent_event_type, $event_type)){
+      if (in_array($cvent_event_type, $event_type)) {
         gsb_cvent_event_import($event);
         break;
       }
@@ -132,9 +131,10 @@ function gsb_cvent_event_import($event) {
     // Create the admission event
     $node = entity_create('node', $field_values);
   }
+
   // Set the workbench access
   $node->workbench_access['access_scheme'] = 'taxonomy'; // or 'menu'
-  $node->workbench_access = array(12401);
+  $node->workbench_access = array(12401, 12396);
   workbench_access_node_insert($node);
 
   // update the admission event node information
@@ -156,9 +156,9 @@ function gsb_cvent_event_import($event) {
   $wrapper->field_program_single->set(10881); // Set it to MBA
 
   // Set the event category
-/*   $term = taxonomy_get_term_by_name((string)$event->CustomFieldDetail[11]->FieldValue, 'event_category');
+  $term = taxonomy_get_term_by_name((string)$event->CustomFieldDetail[11]->FieldValue, 'event_category');
   $term = array_values($term);
-  $wrapper->field_event_category->set($term); */
+  $wrapper->field_event_category->set($term);
 
   // Set the region taxonomy
   $term = taxonomy_get_term_by_name((string)$event->CustomFieldDetail[3]->FieldValue, 'region');
