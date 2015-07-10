@@ -176,8 +176,8 @@ function gsb_cvent_event_import($event) {
   }
   $field_collection_wrapper->field_event_location_type->set((string)$event->CustomFieldDetail[0]->FieldValue);
 
-  $field_collection_wrapper->field_address->postal_code->set(0);
-  $field_collection_wrapper->field_address->thoroughfare->set('Unknown');
+ /*  $field_collection_wrapper->field_address->postal_code->set(0);
+  $field_collection_wrapper->field_address->thoroughfare->set('Unknown'); */
   $field_collection_wrapper->field_address->country->set((string)$event->CountryCode);
   $field_collection_wrapper->field_address->locality->set((string)$event->City);
   if ($event->CountryCode == 'US') {
