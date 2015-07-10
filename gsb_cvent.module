@@ -130,6 +130,7 @@ function gsb_cvent_event_import($event) {
     );
     // Create the admission event
     $node = entity_create('node', $field_values);
+    node_save($node);
   }
 
   // Set the workbench access
