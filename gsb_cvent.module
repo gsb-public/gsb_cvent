@@ -147,11 +147,10 @@ function gsb_cvent_event_import($event) {
   $wrapper->field_item_id->set((string)$event->Id);
   $wrapper->field_editorial_summary->set((string)$event->EventDescription);
   $wrapper->field_link_single->url->set((string)$event->WeblinkDetail[104]->URL);
-
   // Set the event start and end date
   $wrapper->field_event_date[0]->set(array(
-    'value' => $event->EventStartDate,
-    'value2' => $event->EventEndDate,
+    'value' => _gsb_cvent_convert_to_UTC($event->EventStartDate),
+    'value2' => _gsb_cvent_convert_to_UTC($event->EventEndDate),
   ));
   $wrapper->field_time_zone->set('America/Los_Angeles');//(string)$event->Timezone);
   $wrapper->field_program_single->set(10881); // Set it to MBA
@@ -204,4 +203,14 @@ function _gsb_cvent_create_fc_wrapper($entity_type, $node, $field_collection_nam
   $field_collection_item->setHostEntity($entity_type, $node);
   $field_collection_wrapper = entity_metadata_wrapper('field_collection_item', $field_collection_item);
   return $field_collection_wrapper;
+}
+
+/*
+ * Convert to UTC time
+ */
+function _gsb_cvent_convert_to_UTC($date) {
+  $date = new DateObject($date , 'America/Los_Angeles', DATE_FORMAT_ISO);
+  date_timezone_set($date, new DateTimeZone('UTC'));
+  $date = date_format($date, DATE_FORMAT_DATETIME);
+  return $date;
 }
