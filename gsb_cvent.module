@@ -19,9 +19,10 @@ function gsb_cvent_menu() {
   );
 
   $items['admin/config/gsb/cvent/import'] = array(
-    'title' => 'Import',
+    'title' => 'Start Import',
     'description' => 'GSB Cvent Import.',
-    'page callback' => 'gsb_cvent_all_events_import',
+    //'page callback' => 'gsb_cvent_all_events_import',
+    'page callback' => 'gsb_cvent_batch_import',
     'access arguments' => array('administer cvent'),
   );
 
@@ -37,6 +38,42 @@ function gsb_cvent_permission() {
       'title' => t('Administer cvent'),
     ),
   );
+}
+
+/**
+ * The batch callback.
+ */
+function gsb_cvent_batch_import() {
+  $batch = array(
+    'operations' => array(),
+    'finished' => 'gsb_cvent_batch_import_finished',
+    'title' => t('Cvent Batch Import'),
+    'init_message' => t('Import is starting...'),
+    'progress_message' => t('Processed @current out of @total.'),
+    'error_message' => t('Import has encountered an error.')
+  );
+
+  $batch['operations'][] = array('gsb_cvent_batch_all_events_import', array("Cvent"));
+
+  batch_set($batch);
+  batch_process('admin/content'); // The path to redirect to when done.
+}
+
+/**
+ * The batch finish handler.
+ */
+function gsb_cvent_batch_import_finished($success, $results, $operations) {
+  if ($success) {
+    drupal_set_message('Cvent import is complete!');
+  }
+  else {
+    $error_operation = reset($operations);
+    $message = t('An error occurred while processing %error_operation with arguments: @arguments', array(
+      '%error_operation' => $error_operation[0],
+      '@arguments' => print_r($error_operation[1], TRUE)
+    ));
+    drupal_set_message($message, 'error');
+  }
 }
 
 /**
@@ -76,10 +113,9 @@ function  gsb_cvent_search_events_bycondition($client) {
 /* 
  * Gets upcoming events
  */
-function gsb_cvent_all_events_import() {
+function gsb_cvent_batch_all_events_import($options, &$context) {
   $client = gsb_cvent_login();
 
-  $event_ids = gsb_cvent_search_events_bycondition($client);
   //$event_ids = $client->GetUpcomingEvents();
   $event_type = array(
     'Alumni Briefing',
@@ -89,7 +125,20 @@ function gsb_cvent_all_events_import() {
     'Information Session'
   );
 
-  foreach ($event_ids as $event_id) {
+  $limit = 10;
+  if (!isset($context['sandbox']['progress'])) {
+    $event_ids = gsb_cvent_search_events_bycondition($client);
+    $event_chunks = array_chunk($event_ids, $limit);
+    $context['sandbox']['progress'] = 0;
+    $context['sandbox']['max'] = count($event_ids);
+    $context['sandbox']['event_ids'] = $event_chunks;
+    $context['sandbox']['current_chunk'] = 0;
+  }
+
+  // Display a progress message...
+  $current_chunk = $context['sandbox']['current_chunk'];
+
+  foreach ($context['sandbox']['event_ids'][$current_chunk] as $event_id) {
     $event = $client->GetEventById($event_id);
     // check the event type matches
     $cvent_event_types = explode(', ', $event->CustomFieldDetail[11]->FieldValue);
@@ -102,10 +151,17 @@ function gsb_cvent_all_events_import() {
 
     // Import all the sessions as event
     foreach ($event->ProductDetail as $session) {
-       gsb_cvent_event_import($event, $session);
+      gsb_cvent_event_import($event, $session);
     }
+    $context['sandbox']['progress']++;
   }
-  return 'gsb_cvent_all_events_import completed';
+
+  $context['message'] = "Now processing " . $context['sandbox']['progress'] . " out of " . $context['sandbox']['max'] . "..";
+  $context['sandbox']['current_chunk']++;
+
+  if ($context['sandbox']['progress'] < $context['sandbox'] ['max']) {
+    $context['finished'] = $context['sandbox']['progress'] / $context['sandbox']['max'];
+  }
 }
 
 /**
