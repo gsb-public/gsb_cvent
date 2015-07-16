@@ -19,7 +19,7 @@ function gsb_cvent_menu() {
   );
 
   $items['admin/config/gsb/cvent/import'] = array(
-    'title' => 'GSB Cvent Import',
+    'title' => 'Import',
     'description' => 'GSB Cvent Import.',
     'page callback' => 'gsb_cvent_all_events_import',
     'access arguments' => array('administer cvent'),
@@ -99,6 +99,11 @@ function gsb_cvent_all_events_import() {
         break;
       }
     }
+
+    // Import all the sessions as event
+    foreach ($event->ProductDetail as $session) {
+       gsb_cvent_event_import($event, $session);
+    }
   }
   return 'gsb_cvent_all_events_import completed';
 }
@@ -106,14 +111,17 @@ function gsb_cvent_all_events_import() {
 /**
  * Imports an Event
  */
-function gsb_cvent_event_import($event) {
+function gsb_cvent_event_import($event, $session = NULL) {
+
+  // Set the event id
+  $event_id = (empty($session)) ? $event->Id : $session->ProductId;
 
   // Check if the event already exists
   $query = new EntityFieldQuery();
 
   $query->entityCondition('entity_type', 'node')
     ->entityCondition('bundle', 'admission_event')
-    ->fieldCondition('field_item_id', 'value', (string)$event->Id);
+    ->fieldCondition('field_item_id', 'value', (string)$event_id);
 
   $entities = $query->execute();
 
@@ -135,23 +143,38 @@ function gsb_cvent_event_import($event) {
 
   // Set the workbench access
   $node->workbench_access['access_scheme'] = 'taxonomy'; // or 'menu'
-  $node->workbench_access = array(12401, 12396);
+  $node->workbench_access = array(12401, 12396); // Set to MBA and Marketing
   workbench_access_node_insert($node);
 
   // update the admission event node information
   $wrapper = entity_metadata_wrapper('node', $node);
 
-  $wrapper->title->set((string)$event->EventTitle);
+  $wrapper->status = 1;
   $wrapper->field_event_detail->set(1);
-
-  $wrapper->field_item_id->set((string)$event->Id);
-  $wrapper->field_editorial_summary->set((string)$event->EventDescription);
   $wrapper->field_link_single->url->set((string)$event->WeblinkDetail[104]->URL);
+
+  $event_title = $event->EventTitle;
+  $event_desc = $event->EventDescription;
+  $event_start = _gsb_cvent_convert_to_UTC($event->EventStartDate);
+  $event_end = _gsb_cvent_convert_to_UTC($event->EventEndDate);
+
+  if (isset($session) && $session != NULL) {
+    $event_title = $session->ProductName;
+    $event_desc = $session->ProductDescription;
+    $event_start = _gsb_cvent_convert_to_UTC($session->StartTime);
+    $event_end = _gsb_cvent_convert_to_UTC($session->EndTime);
+  }
+
+  $wrapper->field_item_id->set((string)$event_id);
+  $wrapper->title->set((string)$event_title);
+  $wrapper->field_editorial_summary->set((string)$event_desc);
+
   // Set the event start and end date
   $wrapper->field_event_date[0]->set(array(
-    'value' => _gsb_cvent_convert_to_UTC($event->EventStartDate),
-    'value2' => _gsb_cvent_convert_to_UTC($event->EventEndDate),
+    'value' => $event_start,
+    'value2' => $event_end,
   ));
+
   $wrapper->field_time_zone->set('America/Los_Angeles');//(string)$event->Timezone);
   $wrapper->field_program_single->set(10881); // Set it to MBA
 
