@@ -26,6 +26,14 @@ function gsb_cvent_menu() {
     'access arguments' => array('administer cvent'),
   );
 
+  $items['cvent_import_id/%'] = array(
+    'title' => 'GSB Import.',
+    'description' => 'Imports a single event by id',
+    'page callback' => 'gsb_cvent_event_import_id',
+    'page arguments' => array(1),
+    'access arguments' => array('administer cvent'),
+  );
+
   return $items;
 }
 
@@ -164,6 +172,22 @@ function gsb_cvent_batch_all_events_import($options, &$context) {
   }
 }
 
+/*
+ * Import a single event by id
+ */
+function gsb_cvent_event_import_id($event_id) {
+  $client = gsb_cvent_login();
+  $event = $client->GetEventById($event_id);
+  // Import an event
+
+  gsb_cvent_event_import($event);
+  // Import all the sessions as event
+  foreach ($event->ProductDetail as $session) {
+    gsb_cvent_event_import($event, $session);
+  }
+  return 'gsb_cvent_event_import_id completed';
+}
+
 /**
  * Imports an Event
  */
@@ -194,6 +218,7 @@ function gsb_cvent_event_import($event, $session = NULL) {
     );
     // Create the admission event
     $node = entity_create('node', $field_values);
+    $node->workbench_moderation['updating_live_revision'] = 1;
     node_save($node);
   }
 
@@ -205,7 +230,6 @@ function gsb_cvent_event_import($event, $session = NULL) {
   // update the admission event node information
   $wrapper = entity_metadata_wrapper('node', $node);
 
-  $wrapper->status = 1;
   $wrapper->field_event_detail->set(1);
   $wrapper->field_link_single->url->set((string)$event->WeblinkDetail[104]->URL);
 
