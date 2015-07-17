@@ -178,8 +178,8 @@ function gsb_cvent_batch_all_events_import($options, &$context) {
 function gsb_cvent_event_import_id($event_id) {
   $client = gsb_cvent_login();
   $event = $client->GetEventById($event_id);
-  // Import an event
 
+  // Import an event
   gsb_cvent_event_import($event);
   // Import all the sessions as event
   foreach ($event->ProductDetail as $session) {
@@ -259,9 +259,14 @@ function gsb_cvent_event_import($event, $session = NULL) {
   $wrapper->field_program_single->set(10881); // Set it to MBA
 
   // Set the event category
-  $term = taxonomy_get_term_by_name((string)$event->CustomFieldDetail[11]->FieldValue, 'event_category');
-  $term = array_values($term);
-  $wrapper->field_event_category->set($term);
+  $cvent_event_types = explode(', ', $event->CustomFieldDetail[11]->FieldValue);
+  $term_merge = array();
+  foreach ($cvent_event_types as $cvent_event_type) {
+    $term = taxonomy_get_term_by_name($cvent_event_type, 'event_category');
+    $term = array_values($term);
+    $term_merge = array_merge($term_merge, $term);
+    $wrapper->field_event_category->set($term_merge);
+  }
 
   // Set the region taxonomy
   $term = taxonomy_get_term_by_name((string)$event->CustomFieldDetail[3]->FieldValue, 'region');
