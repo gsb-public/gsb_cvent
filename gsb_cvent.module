@@ -49,6 +49,29 @@ function gsb_cvent_permission() {
 }
 
 /**
+ * Login to Cvent API.
+ */
+function gsb_cvent_login() {
+  // Get the library info.
+  $library_path = libraries_get_path('php-cvent') . '/CventClient.class.php';
+  if (!file_exists($library_path)) {
+    drupal_set_message('php-cvent: The CventClient library was not found.', 'error');
+    return;
+  }
+  include_once($library_path);
+  $accountnumber = variable_get('gsb_cvent_account_number', $default = NULL);
+  $username = variable_get('gsb_cvent_user_name', $default = NULL);
+  $password = variable_get('gsb_cvent_password', $default = NULL);
+
+  $client = new CventClient();
+  $client->Login($accountnumber, $username, $password);
+  if (!$client->CventSessionHeader) {
+    watchdog('gsb_cvent', 'Cvent API Login failed!');
+  }
+  return $client;
+}
+
+/**
  * The batch callback.
  */
 function gsb_cvent_batch_import() {
@@ -84,35 +107,15 @@ function gsb_cvent_batch_import_finished($success, $results, $operations) {
   }
 }
 
-/**
- * Login to Cvent API.
- */
-function gsb_cvent_login() {
-  // Get the library info.
-  $library_path = libraries_get_path('php-cvent') . '/CventClient.class.php';
-  if (!file_exists($library_path)) {
-    drupal_set_message('php-cvent: The CventClient library was not found.', 'error');
-    return;
-  }
-  include_once($library_path);
-  $accountnumber = variable_get('gsb_cvent_account_number', $default = NULL);
-  $username = variable_get('gsb_cvent_user_name', $default = NULL);
-  $password = variable_get('gsb_cvent_password', $default = NULL);
- 
-  $client = new CventClient();
-  $client->Login($accountnumber, $username, $password);
-  if (!$client->CventSessionHeader) {
-    watchdog('gsb_cvent', 'Cvent API Login failed!');
-  }
-  return $client;
-}
-
 /* 
  * Search all events based on condition
  */
 function  gsb_cvent_search_events_bycondition($client) {
-  $response = $client->SearchByFilter('Event', 'AndSearch', array(
+  $response = $client->SearchByFilter('Event', 'OrSearch', array(
                 (object) array('Field' => 'EventStatus', 'Operator' => 'Equals', 'Value' => 'Active'),
+                (object) array('Field' => 'EventStatus', 'Operator' => 'Equals', 'Value' => 'Pending'),
+                (object) array('Field' => 'EventStatus', 'Operator' => 'Equals', 'Value' => 'Completed'),
+                (object) array('Field' => 'EventStatus', 'Operator' => 'Equals', 'Value' => 'Cancelled'),
             ));
   if(isset($response->SearchResult->Id)) return $response->SearchResult->Id;
   return false;
@@ -124,11 +127,10 @@ function  gsb_cvent_search_events_bycondition($client) {
 function gsb_cvent_batch_all_events_import($options, &$context) {
   $client = gsb_cvent_login();
 
-  //$event_ids = $client->GetUpcomingEvents();
   $event_type = array(
     'Alumni Briefing',
     'Class Visit',
-    'Diversity Event',
+    'Diversity Event*',
     'Fair',
     'Information Session'
   );
@@ -152,15 +154,12 @@ function gsb_cvent_batch_all_events_import($options, &$context) {
     $cvent_event_types = explode(', ', $event->CustomFieldDetail[11]->FieldValue);
     foreach ($cvent_event_types as $cvent_event_type) {
       if (in_array($cvent_event_type, $event_type)) {
-        gsb_cvent_event_import($event);
+        // Import all the sessions as event
+        gsb_cvent_event_import_id($event_id);
         break;
       }
     }
 
-    // Import all the sessions as event
-    foreach ($event->ProductDetail as $session) {
-      gsb_cvent_event_import($event, $session);
-    }
     $context['sandbox']['progress']++;
   }
 
@@ -179,11 +178,11 @@ function gsb_cvent_event_import_id($event_id) {
   $client = gsb_cvent_login();
   $event = $client->GetEventById($event_id);
 
-  // Import an event
-  gsb_cvent_event_import($event);
   // Import all the sessions as event
   foreach ($event->ProductDetail as $session) {
-    gsb_cvent_event_import($event, $session);
+    if ($session->ProductType == 'Session') {
+      gsb_cvent_event_import($event, $session);
+    }
   }
   return 'gsb_cvent_event_import_id completed';
 }
@@ -218,7 +217,7 @@ function gsb_cvent_event_import($event, $session = NULL) {
     );
     // Create the admission event
     $node = entity_create('node', $field_values);
-    $node->workbench_moderation['updating_live_revision'] = 1;
+    $node->workbench_moderation_state_new = workbench_moderation_state_published();
     node_save($node);
   }
 
@@ -233,16 +232,14 @@ function gsb_cvent_event_import($event, $session = NULL) {
   $wrapper->field_event_detail->set(1);
   $wrapper->field_link_single->url->set((string)$event->WeblinkDetail[104]->URL);
 
-  $event_title = $event->EventTitle;
-  $event_desc = $event->EventDescription;
-  $event_start = _gsb_cvent_convert_to_UTC($event->EventStartDate);
-  $event_end = _gsb_cvent_convert_to_UTC($event->EventEndDate);
-
+  $event_end_time = NULL;
   if (isset($session) && $session != NULL) {
     $event_title = $session->ProductName;
     $event_desc = $session->ProductDescription;
-    $event_start = _gsb_cvent_convert_to_UTC($session->StartTime);
-    $event_end = _gsb_cvent_convert_to_UTC($session->EndTime);
+    $event_start_time = _gsb_cvent_convert_to_UTC($session->StartTime);
+    if (isset($session->EndTime)) {
+      $event_end_time = _gsb_cvent_convert_to_UTC($session->EndTime);
+    }
   }
 
   $wrapper->field_item_id->set((string)$event_id);
@@ -251,12 +248,13 @@ function gsb_cvent_event_import($event, $session = NULL) {
 
   // Set the event start and end date
   $wrapper->field_event_date[0]->set(array(
-    'value' => $event_start,
-    'value2' => $event_end,
+    'value' => $event_start_time,
+    'value2' => $event_end_time,
   ));
 
   $wrapper->field_time_zone->set('America/Los_Angeles');//(string)$event->Timezone);
   $wrapper->field_program_single->set(10881); // Set it to MBA
+  $wrapper->field_event_status->set($session->Status);
 
   // Set the event category
   $cvent_event_types = explode(', ', $event->CustomFieldDetail[11]->FieldValue);
