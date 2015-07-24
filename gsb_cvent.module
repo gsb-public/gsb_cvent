@@ -21,7 +21,6 @@ function gsb_cvent_menu() {
   $items['admin/config/gsb/cvent/import'] = array(
     'title' => 'Start Import',
     'description' => 'GSB Cvent Import.',
-    //'page callback' => 'gsb_cvent_all_events_import',
     'page callback' => 'gsb_cvent_batch_import',
     'access arguments' => array('administer cvent'),
   );
@@ -31,6 +30,13 @@ function gsb_cvent_menu() {
     'description' => 'Imports a single event by id',
     'page callback' => 'gsb_cvent_event_import_id',
     'page arguments' => array(1),
+    'access arguments' => array('administer cvent'),
+  );
+
+  $items['cvent_import_updated'] = array(
+    'title' => 'GSB Import Updated.',
+    'description' => 'Imports updated events',
+    'page callback' => 'gsb_cvent_import_updated',
     'access arguments' => array('administer cvent'),
   );
 
@@ -46,6 +52,13 @@ function gsb_cvent_permission() {
       'title' => t('Administer cvent'),
     ),
   );
+}
+
+/**
+ * Implements hook_cron().
+ */
+function gsb_cvent_cron() {
+  gsb_cvent_import_updated();
 }
 
 /**
@@ -127,14 +140,6 @@ function  gsb_cvent_search_events_bycondition($client) {
 function gsb_cvent_batch_all_events_import($options, &$context) {
   $client = gsb_cvent_login();
 
-  $event_type = array(
-    'Alumni Briefing',
-    'Class Visit',
-    'Diversity Event*',
-    'Fair',
-    'Information Session'
-  );
-
   $limit = 10;
   if (!isset($context['sandbox']['progress'])) {
     $event_ids = gsb_cvent_search_events_bycondition($client);
@@ -153,7 +158,7 @@ function gsb_cvent_batch_all_events_import($options, &$context) {
     // check the event type matches
     $cvent_event_types = explode(', ', $event->CustomFieldDetail[11]->FieldValue);
     foreach ($cvent_event_types as $cvent_event_type) {
-      if (in_array($cvent_event_type, $event_type)) {
+      if (!empty(taxonomy_get_term_by_name($cvent_event_type, 'event_category'))) {
         // Import all the sessions as event
         gsb_cvent_event_import_id($event_id);
         break;
@@ -177,10 +182,11 @@ function gsb_cvent_batch_all_events_import($options, &$context) {
 function gsb_cvent_event_import_id($event_id) {
   $client = gsb_cvent_login();
   $event = $client->GetEventById($event_id);
+  $event_status = field_info_field('field_event_status')['settings']['allowed_values'];
 
   // Import all the sessions as event
   foreach ($event->ProductDetail as $session) {
-    if ($session->ProductType == 'Session') {
+    if ($session->ProductType == 'Session' && in_array($session->Status, $event_status)) {
       gsb_cvent_event_import($event, $session);
     }
   }
@@ -192,15 +198,12 @@ function gsb_cvent_event_import_id($event_id) {
  */
 function gsb_cvent_event_import($event, $session = NULL) {
 
-  // Set the event id
-  $event_id = (empty($session)) ? $event->Id : $session->ProductId;
-
   // Check if the event already exists
   $query = new EntityFieldQuery();
 
   $query->entityCondition('entity_type', 'node')
     ->entityCondition('bundle', 'admission_event')
-    ->fieldCondition('field_item_id', 'value', (string)$event_id);
+    ->fieldCondition('field_item_id', 'value', (string)$session->ProductId);
 
   $entities = $query->execute();
 
@@ -230,31 +233,30 @@ function gsb_cvent_event_import($event, $session = NULL) {
   $wrapper = entity_metadata_wrapper('node', $node);
 
   $wrapper->field_event_detail->set(1);
+  $wrapper->field_program_single->set(10881); // Set it to MBA
+  $wrapper->field_item_id->set((string)$session->ProductId);
+  $wrapper->field_event_status->set($session->Status);
   $wrapper->field_link_single->url->set((string)$event->WeblinkDetail[104]->URL);
 
+  $wrapper->title->set((string)$session->ProductName);
+  $wrapper->field_editorial_summary->set((string)$session->ProductDescription);
+
+  // Get drupal timezone from taxonomy mapping
+  $timezone_term = taxonomy_get_term_by_name((string)$event->Timezone, 'timezone');
+  $timezone_term = array_values($timezone_term);
+  $wrapper->field_time_zone->set($timezone_term[0]->field_drupal_timezone['und'][0]['value']);
+
+  // Convert the start and end time to UTC
+  $event_start_time = _gsb_cvent_convert_to_UTC($session->StartTime);
   $event_end_time = NULL;
-  if (isset($session) && $session != NULL) {
-    $event_title = $session->ProductName;
-    $event_desc = $session->ProductDescription;
-    $event_start_time = _gsb_cvent_convert_to_UTC($session->StartTime);
-    if (isset($session->EndTime)) {
-      $event_end_time = _gsb_cvent_convert_to_UTC($session->EndTime);
-    }
+  if (isset($session->EndTime)) {
+    $event_end_time = _gsb_cvent_convert_to_UTC($session->EndTime);
   }
-
-  $wrapper->field_item_id->set((string)$event_id);
-  $wrapper->title->set((string)$event_title);
-  $wrapper->field_editorial_summary->set((string)$event_desc);
-
   // Set the event start and end date
   $wrapper->field_event_date[0]->set(array(
     'value' => $event_start_time,
     'value2' => $event_end_time,
   ));
-
-  $wrapper->field_time_zone->set('America/Los_Angeles');//(string)$event->Timezone);
-  $wrapper->field_program_single->set(10881); // Set it to MBA
-  $wrapper->field_event_status->set($session->Status);
 
   // Set the event category
   $cvent_event_types = explode(', ', $event->CustomFieldDetail[11]->FieldValue);
@@ -319,4 +321,18 @@ function _gsb_cvent_convert_to_UTC($date) {
   date_timezone_set($date, new DateTimeZone('UTC'));
   $date = date_format($date, DATE_FORMAT_DATETIME);
   return $date;
+}
+
+/*
+ * Import the updated events used for cron run
+ */
+function gsb_cvent_import_updated() {
+  $client = gsb_cvent_login();
+
+  $start_time = date('Y-m-d').'T00:00:00';
+  $end_time = date('Y-m-d').'T11:59:00';
+  $event_ids_updated = $client->GetUpdated('Event', $start_time, $end_time);
+  foreach ($event_ids_updated as $event_id) {
+    gsb_cvent_event_import_id($event_id);
+  }
 }
