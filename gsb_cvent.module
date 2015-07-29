@@ -230,11 +230,10 @@ function gsb_cvent_event_import($event, $session = NULL) {
     node_save($node);
 
     // Set the workbench access
-    $node->workbench_access['access_scheme'] = 'taxonomy'; // or 'menu'
-
-    $workbench_section_tid = _gsb_cvent_get_tid_planner($event->PlannerLastName, 'workbench_sections');
-    $node->workbench_access = array($workbench_section_tid, 12396); // Set also to Marketing
-    workbench_access_node_insert($node);
+    // $node->workbench_access['access_scheme'] = 'taxonomy'; // or 'menu'
+    // $workbench_section_tid = _gsb_cvent_get_tid_planner($event->PlannerLastName, 'workbench_sections');
+    // $node->workbench_access = array($workbench_section_tid, 12396); // Set also to Marketing
+    // workbench_access_node_insert($node);
   }
 
   // update the admission event node information
