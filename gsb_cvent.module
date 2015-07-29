@@ -231,7 +231,9 @@ function gsb_cvent_event_import($event, $session = NULL) {
 
     // Set the workbench access
     $node->workbench_access['access_scheme'] = 'taxonomy'; // or 'menu'
-    $node->workbench_access = array(12401, 12396); // Set to MBA and Marketing
+
+    $workbench_section_tid = _gsb_cvent_get_tid_planner($event->PlannerLastName, 'workbench_sections');
+    $node->workbench_access = array($workbench_section_tid, 12396); // Set also to Marketing
     workbench_access_node_insert($node);
   }
 
@@ -239,8 +241,8 @@ function gsb_cvent_event_import($event, $session = NULL) {
   $wrapper = entity_metadata_wrapper('node', $node);
 
   $wrapper->field_event_detail->set(1);
-  $wrapper->field_program_single->set(10881); // Set it to MBA
-
+  $program_tid = _gsb_cvent_get_tid_planner($event->PlannerLastName, 'program');
+  $wrapper->field_program_single->set($program_tid);
 
   $wrapper->field_item_id->set((string)$eventid);
   $wrapper->field_event_status->set($session->Status);
@@ -258,7 +260,7 @@ function gsb_cvent_event_import($event, $session = NULL) {
   }
   $link_key = _gsb_cvent_search_key_field('Event Summary', $event->WeblinkDetail, 'Target');
   $wrapper->field_link_single->url->set((string)$event->WeblinkDetail[$link_key]->URL);
-  $wrapper->field_calendar_display->set('No');
+  $field_calendar_display = 'No';
 
   // Calendar event display logic
   if ($event->CustomFieldDetail[$show_event_key]->FieldValue == 'Yes') {
@@ -266,7 +268,7 @@ function gsb_cvent_event_import($event, $session = NULL) {
     $start_time = _gsb_cvent_convert_to_UTC($event->EventStartDate);
     $end_time = _gsb_cvent_convert_to_UTC($event->EventEndDate);
     $wrapper->title->set((string)$event->EventTitle);
-    $wrapper->field_calendar_display->set($event->CustomFieldDetail[$show_event_key]->FieldValue);
+    $field_calendar_display = $event->CustomFieldDetail[$show_event_key]->FieldValue;
     $field_editorial_summary = $event->EventDescription;
     // Link logic
     // Check if the 'Event Alternate URL' is populated/not empty
@@ -284,11 +286,12 @@ function gsb_cvent_event_import($event, $session = NULL) {
 
     $show_session_key = _gsb_cvent_search_key_field('3C0E9C6E-0D0F-4AE1-9456-AD206221BB69', $session->CustomFieldDetail, 'FieldId');
     if ($session->CustomFieldDetail[$show_session_key]->FieldValue == 'Yes') {
-      $wrapper->field_calendar_display->set((string)$session->CustomFieldDetail[$show_session_key]->FieldValue);
+      $field_calendar_display = $session->CustomFieldDetail[$show_session_key]->FieldValue;
     }
   }
 
   $wrapper->field_editorial_summary->set((string)$field_editorial_summary);
+  $wrapper->field_calendar_display->set($field_calendar_display);
   // Get drupal timezone from taxonomy mapping
   $timezone_term = taxonomy_get_term_by_name((string)$event->Timezone, 'timezone');
   $timezone_term = array_values($timezone_term);
@@ -390,4 +393,19 @@ function _gsb_cvent_search_key_field($fieldId, $event_object, $field) {
   $key = array_search($fieldId, array_column($event_array, $field));
 
   return $key;
+}
+
+/**
+ * Get the tid from event planner lastname
+ */
+function _gsb_cvent_get_tid_planner($planner_lastname, $vocab_name) {
+  $planner_lastnames = explode(' ', $planner_lastname);
+  foreach($planner_lastnames as $planner_lastname) {
+    $term = taxonomy_get_term_by_name($planner_lastname, $vocab_name);
+    if (!empty($term)) {
+      $tid = array_values($term);
+      $tids = $tid[0]->tid;
+    }
+  }
+  return $tids;
 }
