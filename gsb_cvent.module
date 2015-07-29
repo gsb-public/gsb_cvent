@@ -129,6 +129,7 @@ function  gsb_cvent_search_events_bycondition($client) {
                 (object) array('Field' => 'EventStatus', 'Operator' => 'Equals', 'Value' => 'Pending'),
                 (object) array('Field' => 'EventStatus', 'Operator' => 'Equals', 'Value' => 'Completed'),
                 (object) array('Field' => 'EventStatus', 'Operator' => 'Equals', 'Value' => 'Cancelled'),
+                (object) array('Field' => 'EventStatus', 'Operator' => 'Equals', 'Value' => 'Closed'),
             ));
   if(isset($response->SearchResult->Id)) return $response->SearchResult->Id;
   return false;
@@ -140,7 +141,7 @@ function  gsb_cvent_search_events_bycondition($client) {
 function gsb_cvent_batch_all_events_import($options, &$context) {
   $client = gsb_cvent_login();
 
-  $limit = 10;
+  $limit = 5;
   if (!isset($context['sandbox']['progress'])) {
     $event_ids = gsb_cvent_search_events_bycondition($client);
     $event_chunks = array_chunk($event_ids, $limit);
@@ -156,7 +157,8 @@ function gsb_cvent_batch_all_events_import($options, &$context) {
   foreach ($context['sandbox']['event_ids'][$current_chunk] as $event_id) {
     $event = $client->GetEventById($event_id);
     // check the event type matches
-    $cvent_event_types = explode(', ', $event->CustomFieldDetail[11]->FieldValue);
+    $event_type_key = _gsb_cvent_search_key_field('735ECC32-0F5C-4B43-A2CC-C5B56DC003BC', $event->CustomFieldDetail, 'FieldId');
+    $cvent_event_types = explode(', ', $event->CustomFieldDetail[$event_type_key]->FieldValue);
     foreach ($cvent_event_types as $cvent_event_type) {
       if (!empty(taxonomy_get_term_by_name($cvent_event_type, 'event_category'))) {
         // Import all the sessions as event
@@ -182,11 +184,10 @@ function gsb_cvent_batch_all_events_import($options, &$context) {
 function gsb_cvent_event_import_id($event_id) {
   $client = gsb_cvent_login();
   $event = $client->GetEventById($event_id);
-  $event_status = field_info_field('field_event_status')['settings']['allowed_values'];
 
   // Import all the sessions as event
   foreach ($event->ProductDetail as $session) {
-    if ($session->ProductType == 'Session' && in_array($session->Status, $event_status)) {
+    if ($session->ProductType == 'Session') {
       gsb_cvent_event_import($event, $session);
     }
   }
@@ -197,13 +198,18 @@ function gsb_cvent_event_import_id($event_id) {
  * Imports an Event
  */
 function gsb_cvent_event_import($event, $session = NULL) {
+  $eventid = $session->ProductId;
+  $show_event_key = _gsb_cvent_search_key_field('2395C729-D21C-41A2-AC51-4BCFBDD5DD78', $event->CustomFieldDetail, 'FieldId');
+  if ($event->CustomFieldDetail[$show_event_key]->FieldValue == 'Yes') {
+    $eventid = $event->Id;
+  }
 
   // Check if the event already exists
   $query = new EntityFieldQuery();
 
   $query->entityCondition('entity_type', 'node')
     ->entityCondition('bundle', 'admission_event')
-    ->fieldCondition('field_item_id', 'value', (string)$session->ProductId);
+    ->fieldCondition('field_item_id', 'value', (string)$eventid);
 
   $entities = $query->execute();
 
@@ -222,44 +228,81 @@ function gsb_cvent_event_import($event, $session = NULL) {
     $node = entity_create('node', $field_values);
     $node->workbench_moderation_state_new = workbench_moderation_state_published();
     node_save($node);
-  }
 
-  // Set the workbench access
-  $node->workbench_access['access_scheme'] = 'taxonomy'; // or 'menu'
-  $node->workbench_access = array(12401, 12396); // Set to MBA and Marketing
-  workbench_access_node_insert($node);
+    // Set the workbench access
+    $node->workbench_access['access_scheme'] = 'taxonomy'; // or 'menu'
+    $node->workbench_access = array(12401, 12396); // Set to MBA and Marketing
+    workbench_access_node_insert($node);
+  }
 
   // update the admission event node information
   $wrapper = entity_metadata_wrapper('node', $node);
 
   $wrapper->field_event_detail->set(1);
   $wrapper->field_program_single->set(10881); // Set it to MBA
-  $wrapper->field_item_id->set((string)$session->ProductId);
+
+
+  $wrapper->field_item_id->set((string)$eventid);
   $wrapper->field_event_status->set($session->Status);
-  $wrapper->field_link_single->url->set((string)$event->WeblinkDetail[104]->URL);
 
+  // Convert the start and end time to UTC
+  $start_time = _gsb_cvent_convert_to_UTC($session->StartTime);
+  $end_time = NULL;
+  if (isset($session->EndTime)) {
+    $end_time = _gsb_cvent_convert_to_UTC($session->EndTime);
+  }
   $wrapper->title->set((string)$session->ProductName);
-  $wrapper->field_editorial_summary->set((string)$session->ProductDescription);
+  $field_editorial_summary = $session->ProductDescription;
+  if (empty($session->ProductDescription)) {
+    $field_editorial_summary = $event->EventDescription;
+  }
+  $link_key = _gsb_cvent_search_key_field('Event Summary', $event->WeblinkDetail, 'Target');
+  $wrapper->field_link_single->url->set((string)$event->WeblinkDetail[$link_key]->URL);
+  $wrapper->field_calendar_display->set('No');
 
+  // Calendar event display logic
+  if ($event->CustomFieldDetail[$show_event_key]->FieldValue == 'Yes') {
+    $wrapper->field_event_status->set($event->EventStatus);
+    $start_time = _gsb_cvent_convert_to_UTC($event->EventStartDate);
+    $end_time = _gsb_cvent_convert_to_UTC($event->EventEndDate);
+    $wrapper->title->set((string)$event->EventTitle);
+    $wrapper->field_calendar_display->set($event->CustomFieldDetail[$show_event_key]->FieldValue);
+    $field_editorial_summary = $event->EventDescription;
+    // Link logic
+    // Check if the 'Event Alternate URL' is populated/not empty
+    $link_event_alt_key = _gsb_cvent_search_key_field('09530855-4C9A-47F1-9275-A00DA7DBBF9B', $event->CustomFieldDetail, 'FieldId');
+    if (!empty($event->CustomFieldDetail[$link_event_alt_key]->FieldValue)) {
+      $wrapper->field_link_single->url->set((string)$event->CustomFieldDetail[$link_event_alt_key]->FieldValue);
+    }
+  }
+  else{
+    // Check if the 'Session Alternate URL' is populated/not empty
+    $link_session_alt_key = _gsb_cvent_search_key_field('905225EF-9458-4756-85AC-A499A5B6D11A', $session->CustomFieldDetail, 'FieldId');
+    if (!empty($session->CustomFieldDetail[$link_session_alt_key]->FieldValue)) {
+      $wrapper->field_link_single->url->set((string)$session->CustomFieldDetail[$link_session_alt_key]->FieldValue);
+    }
+
+    $show_session_key = _gsb_cvent_search_key_field('3C0E9C6E-0D0F-4AE1-9456-AD206221BB69', $session->CustomFieldDetail, 'FieldId');
+    if ($session->CustomFieldDetail[$show_session_key]->FieldValue == 'Yes') {
+      $wrapper->field_calendar_display->set((string)$session->CustomFieldDetail[$show_session_key]->FieldValue);
+    }
+  }
+
+  $wrapper->field_editorial_summary->set((string)$field_editorial_summary);
   // Get drupal timezone from taxonomy mapping
   $timezone_term = taxonomy_get_term_by_name((string)$event->Timezone, 'timezone');
   $timezone_term = array_values($timezone_term);
   $wrapper->field_time_zone->set($timezone_term[0]->field_drupal_timezone['und'][0]['value']);
 
-  // Convert the start and end time to UTC
-  $event_start_time = _gsb_cvent_convert_to_UTC($session->StartTime);
-  $event_end_time = NULL;
-  if (isset($session->EndTime)) {
-    $event_end_time = _gsb_cvent_convert_to_UTC($session->EndTime);
-  }
   // Set the event start and end date
   $wrapper->field_event_date[0]->set(array(
-    'value' => $event_start_time,
-    'value2' => $event_end_time,
+    'value' => $start_time,
+    'value2' => $end_time,
   ));
 
   // Set the event category
-  $cvent_event_types = explode(', ', $event->CustomFieldDetail[11]->FieldValue);
+  $event_type_key = _gsb_cvent_search_key_field('735ECC32-0F5C-4B43-A2CC-C5B56DC003BC', $event->CustomFieldDetail, 'FieldId');
+  $cvent_event_types = explode(', ', $event->CustomFieldDetail[$event_type_key]->FieldValue);
   $term_merge = array();
   foreach ($cvent_event_types as $cvent_event_type) {
     $term = taxonomy_get_term_by_name($cvent_event_type, 'event_category');
@@ -269,7 +312,8 @@ function gsb_cvent_event_import($event, $session = NULL) {
   }
 
   // Set the region taxonomy
-  $term = taxonomy_get_term_by_name((string)$event->CustomFieldDetail[3]->FieldValue, 'region');
+  $region_key = _gsb_cvent_search_key_field('DB07E37F-03C9-446C-87DC-2200312C8F46', $event->CustomFieldDetail, 'FieldId');
+  $term = taxonomy_get_term_by_name((string)$event->CustomFieldDetail[$region_key]->FieldValue, 'region');
   $term = array_values($term);
   $wrapper->field_region->set($term);
 
@@ -282,7 +326,8 @@ function gsb_cvent_event_import($event, $session = NULL) {
   else{
     $field_collection_wrapper = entity_metadata_wrapper('field_collection_item', $wrapper->field_event_location[0]->value());
   }
-  $field_collection_wrapper->field_event_location_type->set((string)$event->CustomFieldDetail[0]->FieldValue);
+  $event_cat_key = _gsb_cvent_search_key_field('18F8FBCC-4B15-4027-8FFC-048A6A25EAB1', $event->CustomFieldDetail, 'FieldId');
+  $field_collection_wrapper->field_event_location_type->set((string)$event->CustomFieldDetail[$event_cat_key]->FieldValue);
 
  /*  $field_collection_wrapper->field_address->postal_code->set(0);
   $field_collection_wrapper->field_address->thoroughfare->set('Unknown'); */
@@ -335,4 +380,14 @@ function gsb_cvent_import_updated() {
   foreach ($event_ids_updated as $event_id) {
     gsb_cvent_event_import_id($event_id);
   }
+}
+
+/**
+ * Get the key from event
+ */
+function _gsb_cvent_search_key_field($fieldId, $event_object, $field) {
+  $event_array = json_decode(json_encode($event_object), true);
+  $key = array_search($fieldId, array_column($event_array, $field));
+
+  return $key;
 }
