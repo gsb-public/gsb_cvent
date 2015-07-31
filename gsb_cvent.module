@@ -170,7 +170,7 @@ function gsb_cvent_batch_all_events_import($options, &$context) {
     $context['sandbox']['progress']++;
   }
 
-  $context['message'] = "Now processing " . $context['sandbox']['progress'] . " out of " . $context['sandbox']['max'] . "..";
+  $context['message'] = "Now processed " . $context['sandbox']['progress'] . " out of " . $context['sandbox']['max'] . "..";
   $context['sandbox']['current_chunk']++;
 
   if ($context['sandbox']['progress'] < $context['sandbox'] ['max']) {
@@ -184,11 +184,23 @@ function gsb_cvent_batch_all_events_import($options, &$context) {
 function gsb_cvent_event_import_id($event_id) {
   $client = gsb_cvent_login();
   $event = $client->GetEventById($event_id);
-
-  // Import all the sessions as event
-  foreach ($event->ProductDetail as $session) {
-    if ($session->ProductType == 'Session') {
-      gsb_cvent_event_import($event, $session);
+  $show_event_key = _gsb_cvent_search_key_field('2395C729-D21C-41A2-AC51-4BCFBDD5DD78', $event->CustomFieldDetail, 'FieldId');
+  // Check if Calendar Event Display is Yes (Show Event on Calendar)
+  if ($event->CustomFieldDetail[$show_event_key]->FieldValue == 'Yes') {
+    // Use Event related data and import only event
+    gsb_cvent_event_import($event);
+  }
+  else {
+    // Loop through all the sessions
+    foreach ($event->ProductDetail as $session) {
+      // Check if Calendar Session Display is Yes(Show Session on Calendar) and it is a session
+      if ($session->ProductType == 'Session' && isset($session->CustomFieldDetail)) {
+        $show_session_key = _gsb_cvent_search_key_field('3C0E9C6E-0D0F-4AE1-9456-AD206221BB69', $session->CustomFieldDetail, 'FieldId');
+        if ($session->CustomFieldDetail[$show_session_key]->FieldValue == 'Yes') {
+          // Use Session related data and Import only session
+          gsb_cvent_event_import($event, $session);
+        }
+      }
     }
   }
   return 'gsb_cvent_event_import_id completed';
@@ -198,11 +210,8 @@ function gsb_cvent_event_import_id($event_id) {
  * Imports an Event
  */
 function gsb_cvent_event_import($event, $session = NULL) {
-  $eventid = $session->ProductId;
-  $show_event_key = _gsb_cvent_search_key_field('2395C729-D21C-41A2-AC51-4BCFBDD5DD78', $event->CustomFieldDetail, 'FieldId');
-  if ($event->CustomFieldDetail[$show_event_key]->FieldValue == 'Yes') {
-    $eventid = $event->Id;
-  }
+
+  $eventid = (!empty($session)) ? $session->ProductId : $event->Id;
 
   // Check if the event already exists
   $query = new EntityFieldQuery();
@@ -230,10 +239,10 @@ function gsb_cvent_event_import($event, $session = NULL) {
     node_save($node);
 
     // Set the workbench access
-    // $node->workbench_access['access_scheme'] = 'taxonomy'; // or 'menu'
-    // $workbench_section_tid = _gsb_cvent_get_tid_planner($event->PlannerLastName, 'workbench_sections');
-    // $node->workbench_access = array($workbench_section_tid, 12396); // Set also to Marketing
-    // workbench_access_node_insert($node);
+    $node->workbench_access['access_scheme'] = 'taxonomy'; // or 'menu'
+    $workbench_section_tid = _gsb_cvent_get_tid_planner($event->PlannerLastName, 'workbench_sections');
+    $node->workbench_access = array($workbench_section_tid, 12396); // Set also to Marketing
+    workbench_access_node_update($node);
   }
 
   // update the admission event node information
@@ -244,63 +253,69 @@ function gsb_cvent_event_import($event, $session = NULL) {
   $wrapper->field_program_single->set($program_tid);
 
   $wrapper->field_item_id->set((string)$eventid);
-  $wrapper->field_event_status->set($session->Status);
+  $event_status = $event->EventStatus;
+  $event_title = $event->EventTitle;
+  $field_editorial_summary = $event->EventDescription;
+  $show_event_key = _gsb_cvent_search_key_field('2395C729-D21C-41A2-AC51-4BCFBDD5DD78', $event->CustomFieldDetail, 'FieldId');
+  $field_calendar_display = $event->CustomFieldDetail[$show_event_key]->FieldValue;
+
+  // Link logic
+  // Default to original link
+  $link_key = _gsb_cvent_search_key_field('Event Summary', $event->WeblinkDetail, 'Target');
+  $field_link = $event->WeblinkDetail[$link_key]->URL;
+  // Check if the 'Event Alternate URL' is not empty
+  $link_event_alt_key = _gsb_cvent_search_key_field('09530855-4C9A-47F1-9275-A00DA7DBBF9B', $event->CustomFieldDetail, 'FieldId');
+  if (!empty($event->CustomFieldDetail[$link_event_alt_key]->FieldValue)) {
+    $field_link = $event->CustomFieldDetail[$link_event_alt_key]->FieldValue;
+  }
 
   // Convert the start and end time to UTC
-  $start_time = _gsb_cvent_convert_to_UTC($session->StartTime);
-  $end_time = NULL;
-  if (isset($session->EndTime)) {
-    $end_time = _gsb_cvent_convert_to_UTC($session->EndTime);
-  }
-  $wrapper->title->set((string)$session->ProductName);
-  $field_editorial_summary = $session->ProductDescription;
-  if (empty($session->ProductDescription)) {
-    $field_editorial_summary = $event->EventDescription;
-  }
-  $link_key = _gsb_cvent_search_key_field('Event Summary', $event->WeblinkDetail, 'Target');
-  $wrapper->field_link_single->url->set((string)$event->WeblinkDetail[$link_key]->URL);
-  $field_calendar_display = 'No';
+  $start_time = _gsb_cvent_convert_to_UTC($event->EventStartDate);
+  $end_time = _gsb_cvent_convert_to_UTC($event->EventEndDate);
 
-  // Calendar event display logic
-  if ($event->CustomFieldDetail[$show_event_key]->FieldValue == 'Yes') {
-    $wrapper->field_event_status->set($event->EventStatus);
-    $start_time = _gsb_cvent_convert_to_UTC($event->EventStartDate);
-    $end_time = _gsb_cvent_convert_to_UTC($event->EventEndDate);
-    $wrapper->title->set((string)$event->EventTitle);
-    $field_calendar_display = $event->CustomFieldDetail[$show_event_key]->FieldValue;
-    $field_editorial_summary = $event->EventDescription;
-    // Link logic
-    // Check if the 'Event Alternate URL' is populated/not empty
-    $link_event_alt_key = _gsb_cvent_search_key_field('09530855-4C9A-47F1-9275-A00DA7DBBF9B', $event->CustomFieldDetail, 'FieldId');
-    if (!empty($event->CustomFieldDetail[$link_event_alt_key]->FieldValue)) {
-      $wrapper->field_link_single->url->set((string)$event->CustomFieldDetail[$link_event_alt_key]->FieldValue);
-    }
-  }
-  else{
-    // Check if the 'Session Alternate URL' is populated/not empty
+  // Are we importing sessions
+  if (!empty($session)) {
+    $event_status = $session->Status;
+    $event_title = $session->ProductName;
+    $show_session_key = _gsb_cvent_search_key_field('3C0E9C6E-0D0F-4AE1-9456-AD206221BB69', $session->CustomFieldDetail, 'FieldId');
+    $field_calendar_display = $session->CustomFieldDetail[$show_session_key]->FieldValue;
+
+    // Check if the 'Session Alternate URL' is not empty
     $link_session_alt_key = _gsb_cvent_search_key_field('905225EF-9458-4756-85AC-A499A5B6D11A', $session->CustomFieldDetail, 'FieldId');
     if (!empty($session->CustomFieldDetail[$link_session_alt_key]->FieldValue)) {
-      $wrapper->field_link_single->url->set((string)$session->CustomFieldDetail[$link_session_alt_key]->FieldValue);
+      $field_link = $session->CustomFieldDetail[$link_session_alt_key]->FieldValue;
     }
 
-    $show_session_key = _gsb_cvent_search_key_field('3C0E9C6E-0D0F-4AE1-9456-AD206221BB69', $session->CustomFieldDetail, 'FieldId');
-    if ($session->CustomFieldDetail[$show_session_key]->FieldValue == 'Yes') {
-      $field_calendar_display = $session->CustomFieldDetail[$show_session_key]->FieldValue;
+    $start_time = _gsb_cvent_convert_to_UTC($session->StartTime);
+    $end_time = NULL;
+    if (isset($session->EndTime)) {
+      $end_time = _gsb_cvent_convert_to_UTC($session->EndTime);
+    }
+    // is session description is null
+    if (empty($session->ProductDescription)) {
+      $field_editorial_summary = $session->ProductDescription;
     }
   }
 
+  // Set all the wrapper values
+  $wrapper->field_event_status->set($event_status);
+  $wrapper->title->set((string)$event_title);
   $wrapper->field_editorial_summary->set((string)$field_editorial_summary);
   $wrapper->field_calendar_display->set($field_calendar_display);
-  // Get drupal timezone from taxonomy mapping
-  $timezone_term = taxonomy_get_term_by_name((string)$event->Timezone, 'timezone');
-  $timezone_term = array_values($timezone_term);
-  $wrapper->field_time_zone->set($timezone_term[0]->field_drupal_timezone['und'][0]['value']);
+  $wrapper->field_link_single->url->set((string)$field_link);
 
   // Set the event start and end date
   $wrapper->field_event_date[0]->set(array(
     'value' => $start_time,
     'value2' => $end_time,
   ));
+
+  // Get drupal timezone from taxonomy mapping
+  $timezone_term = taxonomy_get_term_by_name((string)$event->Timezone, 'timezone');
+  $timezone_term = array_values($timezone_term);
+  if (!empty($timezone_term)) {
+    $wrapper->field_time_zone->set($timezone_term[0]->field_drupal_timezone['und'][0]['value']);
+  }
 
   // Set the event category
   $event_type_key = _gsb_cvent_search_key_field('735ECC32-0F5C-4B43-A2CC-C5B56DC003BC', $event->CustomFieldDetail, 'FieldId');
