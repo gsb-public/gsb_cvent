@@ -160,7 +160,8 @@ function gsb_cvent_batch_all_events_import($options, &$context) {
     $event_type_key = _gsb_cvent_search_key_field('735ECC32-0F5C-4B43-A2CC-C5B56DC003BC', $event->CustomFieldDetail, 'FieldId');
     $cvent_event_types = explode(', ', $event->CustomFieldDetail[$event_type_key]->FieldValue);
     foreach ($cvent_event_types as $cvent_event_type) {
-      if (!empty(taxonomy_get_term_by_name($cvent_event_type, 'event_category'))) {
+      $event_cat_term = taxonomy_get_term_by_name($cvent_event_type, 'event_category');
+      if (!empty($event_cat_term)) {
         // Import all the sessions as event
         gsb_cvent_event_import_id($event_id);
         break;
