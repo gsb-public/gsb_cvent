@@ -185,6 +185,7 @@ function gsb_cvent_batch_all_events_import($options, &$context) {
 function gsb_cvent_event_import_id($event_id) {
   $client = gsb_cvent_login();
   $event = $client->GetEventById($event_id);
+
   $show_event_key = _gsb_cvent_search_key_field('2395C729-D21C-41A2-AC51-4BCFBDD5DD78', $event->CustomFieldDetail, 'FieldId');
   // Check if Calendar Event Display is Yes (Show Event on Calendar)
   if ($event->CustomFieldDetail[$show_event_key]->FieldValue == 'Yes') {
@@ -303,7 +304,9 @@ function gsb_cvent_event_import($event, $session = NULL) {
   $wrapper->title->set((string)$event_title);
   $wrapper->field_editorial_summary->set((string)$field_editorial_summary);
   $wrapper->field_calendar_display->set($field_calendar_display);
-  $wrapper->field_link_single->url->set((string)$field_link);
+  if (valid_url($field_link, TRUE)) {
+    $wrapper->field_link_single->url->set($field_link);
+  }
 
   // Set the event start and end date
   $wrapper->field_event_date[0]->set(array(
@@ -392,8 +395,13 @@ function _gsb_cvent_convert_to_UTC($date) {
 function gsb_cvent_import_updated() {
   $client = gsb_cvent_login();
 
-  $start_time = date('Y-m-d').'T00:00:00';
-  $end_time = date('Y-m-d').'T23:59:00';
+  $start_time = date('Y-m-d');
+  $time = date('H:i:s');
+  $end_time = date('Y-m-d', strtotime('+1 days'));
+
+  $start_time .= 'T'.$time;
+  $end_time .= 'T'.$time;
+
   $event_ids_updated = $client->GetUpdated('Event', $start_time, $end_time);
   if (isset($event_ids_updated->GetUpdatedResult)) {
     foreach ($event_ids_updated->GetUpdatedResult->Id as $event_id) {
