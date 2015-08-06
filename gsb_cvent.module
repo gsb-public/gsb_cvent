@@ -271,9 +271,12 @@ function gsb_cvent_event_import($event, $session = NULL) {
     $field_link = $event->CustomFieldDetail[$link_event_alt_key]->FieldValue;
   }
 
+  // Get drupal timezone from taxonomy mapping
+  $timezone = _gsb_cvent_map_timezone($event);
+
   // Convert the start and end time to UTC
-  $start_time = _gsb_cvent_convert_to_UTC($event->EventStartDate);
-  $end_time = _gsb_cvent_convert_to_UTC($event->EventEndDate);
+  $start_time = _gsb_cvent_convert_to_UTC($event->EventStartDate, $timezone);
+  $end_time = _gsb_cvent_convert_to_UTC($event->EventEndDate, $timezone);
 
   // Are we importing sessions
   if (!empty($session)) {
@@ -288,10 +291,10 @@ function gsb_cvent_event_import($event, $session = NULL) {
       $field_link = $session->CustomFieldDetail[$link_session_alt_key]->FieldValue;
     }
 
-    $start_time = _gsb_cvent_convert_to_UTC($session->StartTime);
+    $start_time = _gsb_cvent_convert_to_UTC($session->StartTime, $timezone);
     $end_time = NULL;
     if (isset($session->EndTime)) {
-      $end_time = _gsb_cvent_convert_to_UTC($session->EndTime);
+      $end_time = _gsb_cvent_convert_to_UTC($session->EndTime, $timezone);
     }
     // is session description is null
     if (empty($session->ProductDescription)) {
@@ -314,11 +317,9 @@ function gsb_cvent_event_import($event, $session = NULL) {
     'value2' => $end_time,
   ));
 
-  // Get drupal timezone from taxonomy mapping
-  $timezone_term = taxonomy_get_term_by_name((string)$event->Timezone, 'timezone');
-  $timezone_term = array_values($timezone_term);
-  if (!empty($timezone_term)) {
-    $wrapper->field_time_zone->set($timezone_term[0]->field_drupal_timezone['und'][0]['value']);
+
+  if (!empty($timezone)) {
+    $wrapper->field_time_zone->set($timezone);
   }
 
   // Set the event category
@@ -366,6 +367,17 @@ function gsb_cvent_event_import($event, $session = NULL) {
   $wrapper->save();
 }
 
+function _gsb_cvent_map_timezone($event) {
+  $new_timezone = '';
+  // Get drupal timezone from taxonomy mapping
+  $timezone_term = taxonomy_get_term_by_name((string)$event->Timezone, 'timezone');
+  $timezone_term = array_values($timezone_term);
+  if (!empty($timezone_term)) {
+    $new_timezone = $timezone_term[0]->field_drupal_timezone['und'][0]['value'] ;
+  }
+  return $new_timezone;
+}
+
 /**
  * Create the field collection wrapper
  */
@@ -382,8 +394,11 @@ function _gsb_cvent_create_fc_wrapper($entity_type, $node, $field_collection_nam
 /*
  * Convert to UTC time
  */
-function _gsb_cvent_convert_to_UTC($date) {
-  $date = new DateObject($date , 'America/Los_Angeles', DATE_FORMAT_ISO);
+function _gsb_cvent_convert_to_UTC($date, $timezone = 'America/Los_Angeles') {
+  if (empty($timezone)) {
+    $timezone = 'America/Los_Angeles';
+  }
+  $date = new DateObject($date , $timezone, DATE_FORMAT_ISO);
   date_timezone_set($date, new DateTimeZone('UTC'));
   $date = date_format($date, DATE_FORMAT_DATETIME);
   return $date;
