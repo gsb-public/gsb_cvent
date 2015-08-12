@@ -120,7 +120,7 @@ function gsb_cvent_batch_import_finished($success, $results, $operations) {
   }
 }
 
-/* 
+/*
  * Search all events based on condition
  */
 function  gsb_cvent_search_events_bycondition($client) {
@@ -135,7 +135,7 @@ function  gsb_cvent_search_events_bycondition($client) {
   return false;
 }
 
-/* 
+/*
  * Gets upcoming events
  */
 function gsb_cvent_batch_all_events_import($options, &$context) {
@@ -185,17 +185,68 @@ function gsb_cvent_batch_all_events_import($options, &$context) {
 function gsb_cvent_event_import_id($event_id) {
   $client = gsb_cvent_login();
   $event = $client->GetEventById($event_id);
-
   $show_event_key = _gsb_cvent_search_key_field('2395C729-D21C-41A2-AC51-4BCFBDD5DD78', $event->CustomFieldDetail, 'FieldId');
-  // Check if Calendar Event Display is Yes (Show Event on Calendar)
-  if ($event->CustomFieldDetail[$show_event_key]->FieldValue == 'Yes') {
-    // Use Event related data and import only event
+
+  // Save the event if it already exists.
+  $query = new EntityFieldQuery();
+
+  $query->entityCondition('entity_type', 'node')
+    ->entityCondition('bundle', 'admission_event')
+    ->fieldCondition('field_item_id', 'value', (string)$event_id);
+
+  $entities = $query->execute();
+  if (!empty($entities['node'])) {
     gsb_cvent_event_import($event);
   }
-  else {
+
+  // Save the event if it is set to yes.
+  if ($event->CustomFieldDetail[$show_event_key]->FieldValue == 'Yes') {
+    gsb_cvent_event_import($event);
+  }
+
+  // Save the sessions if they already exist
+  foreach ($event->ProductDetail as $session) {
+    if ($session->ProductType == 'Session' && isset($session->CustomFieldDetail)) {
+      $query = new EntityFieldQuery();
+
+      $query->entityCondition('entity_type', 'node')
+        ->entityCondition('bundle', 'admission_event')
+        ->fieldCondition('field_item_id', 'value', (string) $session->ProductId);
+
+      $entities = $query->execute();
+      if (!empty($entities['node'])) {
+        gsb_cvent_event_import($event, $session);
+      }
+    }
+  }
+
+  // If the event is set to display. Make any sessions that already exist set to
+  // no.
+  if ($event->CustomFieldDetail[$show_event_key]->FieldValue == 'Yes') {
     // Loop through all the sessions
     foreach ($event->ProductDetail as $session) {
-      // Check if Calendar Session Display is Yes(Show Session on Calendar) and it is a session
+      if ($session->ProductType == 'Session' && isset($session->CustomFieldDetail)) {
+        $query = new EntityFieldQuery();
+
+        $query->entityCondition('entity_type', 'node')
+          ->entityCondition('bundle', 'admission_event')
+          ->fieldCondition('field_item_id', 'value', (string) $session->ProductId);
+
+        $entities = $query->execute();
+        if (!empty($entities['node'])) {
+          $nid = array_keys($entities['node']);
+          $node = node_load(array_shift($nid));
+          $node->field_calendar_display[$node->language][0]['value'] = 'No';
+          node_save($node);
+        }
+      }
+    }
+  }
+
+  // If the event is not set to display, save any sessions that are set to display
+  if ($event->CustomFieldDetail[$show_event_key]->FieldValue == 'No') {
+    // Loop through all the sessions
+    foreach ($event->ProductDetail as $session) {
       if ($session->ProductType == 'Session' && isset($session->CustomFieldDetail)) {
         $show_session_key = _gsb_cvent_search_key_field('3C0E9C6E-0D0F-4AE1-9456-AD206221BB69', $session->CustomFieldDetail, 'FieldId');
         if ($session->CustomFieldDetail[$show_session_key]->FieldValue == 'Yes') {
@@ -205,6 +256,7 @@ function gsb_cvent_event_import_id($event_id) {
       }
     }
   }
+
   return 'gsb_cvent_event_import_id completed';
 }
 
