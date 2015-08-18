@@ -298,7 +298,6 @@ function gsb_cvent_event_import($event, $session = NULL) {
     $node->workbench_access = array($workbench_section_tid, 12396); // Set also to Marketing
     workbench_access_node_update($node);
   }
-
   // update the admission event node information
   $wrapper = entity_metadata_wrapper('node', $node);
 
@@ -358,6 +357,7 @@ function gsb_cvent_event_import($event, $session = NULL) {
   $wrapper->field_calendar_display->set($field_calendar_display);
   if (valid_url($field_link, TRUE)) {
     $wrapper->field_link_single->url->set($field_link);
+    $wrapper->field_link_single->attributes->set(array('target' => '_blank'));
   }
 
   // Set the event start and end date
