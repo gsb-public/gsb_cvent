@@ -244,7 +244,7 @@ function gsb_cvent_event_import_id($event_id) {
   }
 
   // If the event is not set to display, save any sessions that are set to display
-  if ($event->CustomFieldDetail[$show_event_key]->FieldValue == 'No') {
+  if ($event->CustomFieldDetail[$show_event_key]->FieldValue == 'No' || empty($event->CustomFieldDetail[$show_event_key]->FieldValue)) {
     // Loop through all the sessions
     foreach ($event->ProductDetail as $session) {
       if ($session->ProductType == 'Session' && isset($session->CustomFieldDetail)) {
@@ -448,6 +448,7 @@ function gsb_cvent_import_updated() {
   $client = gsb_cvent_login();
 
   $start_time = date('Y-m-d');
+
   $time = date('H:i:s');
   $end_time = date('Y-m-d', strtotime('+1 days'));
 
@@ -455,9 +456,16 @@ function gsb_cvent_import_updated() {
   $end_time .= 'T'.$time;
 
   $event_ids_updated = $client->GetUpdated('Event', $start_time, $end_time);
+
   if (isset($event_ids_updated->GetUpdatedResult)) {
-    foreach ($event_ids_updated->GetUpdatedResult->Id as $event_id) {
+    if (count($event_ids_updated->GetUpdatedResult->Id) == 1) {
+      $event_id = $event_ids_updated->GetUpdatedResult->Id;
       gsb_cvent_event_import_id($event_id);
+    }
+    else {
+      foreach ($event_ids_updated->GetUpdatedResult->Id as $event_id) {
+        gsb_cvent_event_import_id($event_id);
+      }
     }
   }
   return 'Updated events import complete';
